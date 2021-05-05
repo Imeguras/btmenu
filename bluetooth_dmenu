@@ -84,7 +84,9 @@ execute_mode() {
         #echo $name
         #echo $name
         mac=$(echo "$name" | sed -e "s/: yes/ off/")
-        mac=$(echo "$name" | sed -e "s/: no/ on/")
+        if [[ $mac =~ "$name" ]]; then 
+            mac=$(echo "$name" | sed -e "s/: no/ on/")
+        fi
         echo ${mac,,} | _bluetoothctl
         #mac=$(printf '%s\n' ${mac,,} | _bluetoothctl)
         #notify "Attempting to change ${name:format+1:-5}"
