@@ -1,28 +1,27 @@
-#!/bin/bash
+#!/bin/sh
 
 _bluetoothctl() {
     LC_ALL=C timeout 30 bluetoothctl
 }
 
 mode=connect
-
 # Name -> MAC
-declare -A DEVICES
-finalArgs=()
-format=0
-while read -r _ mac name; do
-    DEVICES["$name"]=$mac
-    if [ ${#name} > $format ]; then
-        format=$((${#name}+4))
+#declare -A DEVICES
+#finalArgs=()
+#format=0
+while read mac; do
+    a=$(echo ${mac##*/dev_}| grep -v "└─/org")
+    if [ -z $a ]; then
+        continue;
     fi
-done < <(echo "devices" | _bluetoothctl | awk '$1 == "Device"')
+    b=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Alias)
+    c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
+    set +x $@ $a $b $c
+done < <(busctl tree org.bluez)
+unset a; unset b; unset c;
 notify() {
-    local msg
-    local is_error
-
     msg=${1?BUG: no message}
     is_error=${2:-0}
-
     if command -v notify-send >/dev/null 2>&1; then
         notify-send "btmenu" "$msg"  # TODO: escaping
     fi
@@ -32,19 +31,21 @@ notify() {
     else
         printf '%s\n' "$msg"
     fi
+    unset msg
+    unset is_error
 }
 
 execute_mode() {
-    local mode
-    local name
-    local mac
-    local preposition
-    local expected_to_connect
-    local retries
-
+    
+    #local mode
+    #local name
+    #local mac
+    #local preposition
+    #local expected_to_connect
+    #local retries
     mode=${1?BUG: missing mode}
     retries=15
-
+    
     case $mode in
         connect)
             preposition=to
@@ -55,46 +56,48 @@ execute_mode() {
             expected_to_connect=no
         ;;
     esac
-
-    if ! ((${#DEVICES[@]} )); then
-        notify "No devices found. Are they registered with D-Bus?" 1
+    if [ -z "$2" ]; then
+        notify "No devices found. Are they registered with D-Bus?"  
         return 2
     fi
-    local inc=0
-    local prov
-    finalArgs=("${!DEVICES[@]}") 
-    while (( ${#finalArgs[@]} > $inc)); do
-        prov=${finalArgs[$inc]}
-        finalArgs[$inc]="    "$prov
-        while (( ${#finalArgs[$inc]} <= $format )); do
-            finalArgs[$inc]+=" "
-        done
-        finalArgs[$inc]+="|"${DEVICES[$prov]}"|"
-        inc=$((inc+1))
+    inc=$#
+    while (( $inc >= 1 )); do
+        eval echo \"\$$inc\"
+        inc=$((inc-2))
     done
+    #finalArgs=("${!DEVICES[@]}") 
+    #while (( ${#finalArgs[@]} > $inc)); do
+    #    prov=${finalArgs[$inc]}
+    #    finalArgs[$inc]="    "$prov
+    #    while (( ${#finalArgs[$inc]} <= $format )); do
+    #        finalArgs[$inc]+=" "
+    #    done
+    #    finalArgs[$inc]+="|"${DEVICES[$prov]}"|"
+    #   inc=$((inc+1))
+    #done
+    
     finalArgs[inc++]=" "
-    finalArgs[inc++]=$(echo show | _bluetoothctl | grep -m 1 "Powered:" | cut -c2- | sed -e "s/Powered/Power/")
-    finalArgs[inc++]=$(echo show | _bluetoothctl | grep -m 1 "Discoverable:"| cut -c2-)
-    finalArgs[inc++]=$(echo show | _bluetoothctl | awk "/Pairable:/{i++}i==2{print; exit}"| cut -c2-)
+    finalArgs[inc++]="Powered"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -e "s/b/:/")
+    finalArgs[inc++]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
+    finalArgs[inc++]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
     name=$(printf '%s\n' "${finalArgs[@]}" | dmenu -l ${#finalArgs[@]} -p "btmenu")
+    unset inc
     [[ $name ]] || return
     mac=${name:format+2:-1}
     if [[ ${name:1:1} != " " ]]; then
-        #avoiding a if here
-        #echo $name
-        #echo $name
+        notify "Changing $name"
         mac=$(echo "$name" | sed -e "s/: yes/ off/")
         if [[ $mac =~ "$name" ]]; then 
             mac=$(echo "$name" | sed -e "s/: no/ on/")
         fi
-        echo ${mac,,} | _bluetoothctl
-        #mac=$(printf '%s\n' ${mac,,} | _bluetoothctl)
-        #notify "Attempting to change ${name:format+1:-5}"
+        debug=$(echo ${mac,,} | _bluetoothctl)
+        echo $debug 
         exit 
     else
+    
         notify "Attempting to $mode $preposition $mac"
         while (( retries-- )); do
-            printf 'power on\n%s %s\n' "$mode" "$mac" | _bluetoothctl
+            printf '%s %s\n' "$mode" "$mac" | _bluetoothctl
             if printf 'info %s\n' "$mac" |
                 _bluetoothctl |
                 grep -Pq '^[\t ]+Connected: '"$expected_to_connect"; then
@@ -108,17 +111,25 @@ execute_mode() {
         notify "Failed to $mode $preposition $name" 1
         return "$ret"
     fi
-
+    unset mode
+    unset name
+    unset mac
+    unset preposition
+    unset expected_to_connect
+    unset retries
+    
 }
 
 i=2
 
+
 for arg do
     if [[ $arg == :: ]]; then
+        echo "abems"
         dmenu_args=( "${@:$i}" )
         break
     fi
-
+   
     case "$arg" in
         -d) mode=disconnect ;;
     esac
@@ -126,4 +137,5 @@ for arg do
     (( i++ ))
 done
 
-execute_mode "$mode"
+set +x $mode $@ 
+execute_mode "$@"
