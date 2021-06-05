@@ -1,5 +1,6 @@
 #!/bin/sh
-
+IFS=$'\n'
+tempfile="/tmp/bluethoothdmenudevicelist.txt"
 _bluetoothctl() {
     LC_ALL=C timeout 30 bluetoothctl
 }
@@ -9,15 +10,20 @@ mode=connect
 #declare -A DEVICES
 #finalArgs=()
 #format=0
+busctl tree org.bluez > $tempfile
 while read mac; do
     a=$(echo ${mac##*/dev_}| grep -v "└─/org")
     if [ -z $a ]; then
         continue;
     fi
     b=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Alias)
+    b=${b##s }
+    
     c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
+    c=${c##s }
+    old=""
     set +x $@ $a $b $c
-done < <(busctl tree org.bluez)
+done < $tempfile
 unset a; unset b; unset c;
 notify() {
     msg=${1?BUG: no message}
@@ -60,27 +66,35 @@ execute_mode() {
         notify "No devices found. Are they registered with D-Bus?"  
         return 2
     fi
+    tella=$@
     inc=$#
-    while (( $inc >= 1 )); do
-        eval echo \"\$$inc\"
-        inc=$((inc-2))
+    inc=$((inc-1))
+    demon=$(eval printf \"\$$inc\"); 
+    demon="    "${demon:1:-1}
+    inc=$((inc-3))
+    while (( $inc >= 2 )); do
+        aussie=$(eval printf \"\$$inc\"); 
+        demon=$(printf %s»«%s $demon ${aussie:1:-1});
+        #demon=${eval echo \"\$$inc\"}
+        #printf $demon
+        
+        #set +x $@ $demon
+        #echo $1
+        inc=$((inc-3))
     done
-    #finalArgs=("${!DEVICES[@]}") 
-    #while (( ${#finalArgs[@]} > $inc)); do
-    #    prov=${finalArgs[$inc]}
-    #    finalArgs[$inc]="    "$prov
-    #    while (( ${#finalArgs[$inc]} <= $format )); do
-    #        finalArgs[$inc]+=" "
-    #    done
-    #    finalArgs[$inc]+="|"${DEVICES[$prov]}"|"
-    #   inc=$((inc+1))
-    #done
     
-    finalArgs[inc++]=" "
-    finalArgs[inc++]="Powered"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -e "s/b/:/")
-    finalArgs[inc++]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
-    finalArgs[inc++]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
-    name=$(printf '%s\n' "${finalArgs[@]}" | dmenu -l ${#finalArgs[@]} -p "btmenu")
+    demon=$(echo $demon | sed -E "s/«/    /g" | sed -E "s/»/\n/g")
+    demon+=$(printf \\n%s " ")
+    #
+    #echo demon
+    #printf $final
+    #set x; shift
+    #finalArgs[tinc]=" "
+    #finalArgs[tinc]="Powered"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -e "s/b/:/")
+    #finalArgs[tinc]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
+    #finalArgs[tinc]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
+    name=$(printf '%s\n' $demon | dmenu -l $# -p "btmenu")
+    unset tinc
     unset inc
     [[ $name ]] || return
     mac=${name:format+2:-1}
@@ -123,19 +137,19 @@ execute_mode() {
 i=2
 
 
-for arg do
-    if [[ $arg == :: ]]; then
-        echo "abems"
-        dmenu_args=( "${@:$i}" )
-        break
-    fi
+#for arg do
+    #if [ $arg == :: ]; then
+    #    dmenu_args=$( "${@:$i}" )
+    #    break
+    #fi
    
-    case "$arg" in
-        -d) mode=disconnect ;;
-    esac
+#    case "$arg" in
+#        -d) mode=disconnect ;;
+#    esac
 
-    (( i++ ))
-done
-
+#    (( i++ ))
+#done
+#echo $mode
 set +x $mode $@ 
+
 execute_mode "$@"
