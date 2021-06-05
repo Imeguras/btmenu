@@ -70,10 +70,15 @@ execute_mode() {
     inc=$#
     inc=$((inc-1))
     demon=$(eval printf \"\$$inc\"); 
+    smoll=${#demon}
     demon="    "${demon:1:-1}
+    
     inc=$((inc-3))
     while (( $inc >= 2 )); do
         aussie=$(eval printf \"\$$inc\"); 
+        #if [ ${#aussie} > $smoll ]; then 
+        #    smoll=${#aussie}
+        #fi
         demon=$(printf %s»«%s $demon ${aussie:1:-1});
         #demon=${eval echo \"\$$inc\"}
         #printf $demon
@@ -86,6 +91,9 @@ execute_mode() {
     demon=$(echo $demon | sed -E "s/«/    /g" | sed -E "s/»/\n/g")
     demon+=$(printf \\n%s " ")
     #
+    demon+=$(printf \\nPowered%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -E "s/b/:/"`)
+    demon+=$(printf \\nDiscoverable%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -E "s/b/:/"`)
+    demon+=""$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
     #echo demon
     #printf $final
     #set x; shift
@@ -94,9 +102,11 @@ execute_mode() {
     #finalArgs[tinc]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
     #finalArgs[tinc]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
     name=$(printf '%s\n' $demon | dmenu -l $# -p "btmenu")
+    unset demon
     unset tinc
     unset inc
-    [[ $name ]] || return
+    #[[ $name ]] || return
+    return
     mac=${name:format+2:-1}
     if [[ ${name:1:1} != " " ]]; then
         notify "Changing $name"
