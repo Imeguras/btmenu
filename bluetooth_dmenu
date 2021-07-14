@@ -4,12 +4,10 @@ tempfile="/tmp/bluethoothdmenudevicelist.txt"
 _bluetoothctl() {
     LC_ALL=C timeout 30 bluetoothctl
 }
-
-mode=connect
-# Name -> MAC
-#declare -A DEVICES
-#finalArgs=()
-#format=0
+smoll=0
+mode="connect"
+set +x $mode 
+unset $mode
 busctl tree org.bluez > $tempfile
 while read mac; do
     a=$(echo ${mac##*/dev_}| grep -v "└─/org")
@@ -21,35 +19,36 @@ while read mac; do
     
     c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
     c=${c##s }
+    if ( 
+        [ ${#b} > $smoll ]
+    ) then ( 
+        smoll=${#b} 
+    ) fi
     old=""
-    set +x $@ $a $b $c
+    set +x $@ $a $b $c;
+    
 done < $tempfile
-unset a; unset b; unset c;
-notify() {
-    msg=${1?BUG: no message}
-    is_error=${2:-0}
-    if command -v notify-send >/dev/null 2>&1; then
-        notify-send "btmenu" "$msg"  # TODO: escaping
-    fi
 
-    if (( is_error )); then
-        printf 'ERROR: %s\n' "$msg" >&2
-    else
-        printf '%s\n' "$msg"
-    fi
-    unset msg
-    unset is_error
-}
+unset a; unset b; unset c;
+#echo "$#"
+#notify() {
+#    msg=${1?BUG: no message}
+#    is_error=${2:-0}
+#    if command -v notify-send >/dev/null 2>&1; then
+#        notify-send "btmenu" "$msg"  # TODO: escaping
+#    fi
+#
+#    if (( is_error )); then
+#        printf 'ERROR: %s\n' "$msg" >&2
+#    else
+#        printf '%s\n' "$msg"
+#    fi
+#    unset msg
+#    unset is_error
+#}
 
 execute_mode() {
-    
-    #local mode
-    #local name
-    #local mac
-    #local preposition
-    #local expected_to_connect
-    #local retries
-    mode=${1?BUG: missing mode}
+    local mode=${1?BUG: missing mode}
     retries=15
     
     case $mode in
@@ -62,51 +61,44 @@ execute_mode() {
             expected_to_connect=no
         ;;
     esac
-    if [ -z "$2" ]; then
-        notify "No devices found. Are they registered with D-Bus?"  
-        return 2
-    fi
-    tella=$@
+    #TODO annoying...
+    #if ( ${2:-true} ) then 
+    #    notify "No devices found. Are they registered with D-Bus?"  
+    #    return 2
+    #fi
     inc=$#
     inc=$((inc-1))
     demon=$(eval printf \"\$$inc\"); 
+    inc=$((inc-2))
+    tellar=$(eval printf \"\$$inc\"); 
     smoll=${#demon}
-    demon="    "${demon:1:-1}
-    
-    inc=$((inc-3))
+    demon=${demon:1:-1}$tella$tellar
+    inc=$((inc-1))
     while (( $inc >= 2 )); do
         aussie=$(eval printf \"\$$inc\"); 
-        #if [ ${#aussie} > $smoll ]; then 
-        #    smoll=${#aussie}
-        #fi
-        demon=$(printf %s»«%s $demon ${aussie:1:-1});
+        inc=$((inc-2))
+        tellar=$(eval printf \"\$$inc\"); 
+        inc=$((inc+2))
+        demon=$(printf "%s»%s%s" $demon ${aussie:1:-1} $tellar);
+        
         #demon=${eval echo \"\$$inc\"}
         #printf $demon
-        
         #set +x $@ $demon
         #echo $1
         inc=$((inc-3))
     done
-    
-    demon=$(echo $demon | sed -E "s/«/    /g" | sed -E "s/»/\n/g")
+    #| sed -E "s/«/    /g" 
+    demon=$(echo $demon | sed -E "s/»/`space=${#demon}; while (( smoll > i++ )); do ( printf " " ); done; unset space;`\n/g")
     demon+=$(printf \\n%s " ")
-    #
     demon+=$(printf \\nPowered%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -E "s/b/:/"`)
     demon+=$(printf \\nDiscoverable%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -E "s/b/:/"`)
-    demon+=""$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
-    #echo demon
-    #printf $final
-    #set x; shift
-    #finalArgs[tinc]=" "
-    #finalArgs[tinc]="Powered"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -e "s/b/:/")
-    #finalArgs[tinc]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
-    #finalArgs[tinc]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
+    demon+=$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
     name=$(printf '%s\n' $demon | dmenu -l $# -p "btmenu")
+    unset aussie
     unset demon
-    unset tinc
     unset inc
+    return 
     #[[ $name ]] || return
-    return
     mac=${name:format+2:-1}
     if [[ ${name:1:1} != " " ]]; then
         notify "Changing $name"
@@ -143,23 +135,5 @@ execute_mode() {
     unset retries
     
 }
-
-i=2
-
-
-#for arg do
-    #if [ $arg == :: ]; then
-    #    dmenu_args=$( "${@:$i}" )
-    #    break
-    #fi
-   
-#    case "$arg" in
-#        -d) mode=disconnect ;;
-#    esac
-
-#    (( i++ ))
-#done
-#echo $mode
-set +x $mode $@ 
-
+printf "%s" "$@"
 execute_mode "$@"
