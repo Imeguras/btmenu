@@ -1,13 +1,15 @@
 #!/bin/sh
 IFS=$'\n'
+MAXLINES=15
 tempfile="/tmp/bluethoothdmenudevicelist.txt"
 _bluetoothctl() {
     LC_ALL=C timeout 30 bluetoothctl
 }
-smoll=0
+width=0
 mode="connect"
 set +x $mode 
 unset $mode
+
 busctl tree org.bluez > $tempfile
 while read mac; do
     a=$(echo ${mac##*/dev_}| grep -v "└─/org")
@@ -19,11 +21,11 @@ while read mac; do
     
     c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
     c=${c##s }
-    if ( 
-        [ ${#b} > $smoll ]
-    ) then ( 
-        smoll=${#b} 
-    ) fi
+    #if ( 
+    #    [ ${#b} > $width ]
+    #) then ( 
+    #    width=${#b} 
+    #) fi
     old=""
     set +x $@ $a $b $c;
     
@@ -31,23 +33,30 @@ done < $tempfile
 
 unset a; unset b; unset c;
 #echo "$#"
-#notify() {
-#    msg=${1?BUG: no message}
-#    is_error=${2:-0}
-#    if command -v notify-send >/dev/null 2>&1; then
-#        notify-send "btmenu" "$msg"  # TODO: escaping
-#    fi
-#
-#    if (( is_error )); then
-#        printf 'ERROR: %s\n' "$msg" >&2
-#    else
-#        printf '%s\n' "$msg"
-#    fi
-#    unset msg
-#    unset is_error
-#}
+notify() {
+    msg=${1?BUG: no message}
+    is_error=${2:-0}
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "btmenu" "$msg"  # TODO: escaping
+    fi
+
+    if (( is_error )); then
+        printf 'ERROR: %s\n' "$msg" >&2
+    else
+        printf '%s\n' "$msg"
+    fi
+    unset msg
+    unset is_error
+}
+setwidth(){
+    width=0
+    for str in "$@"; do
+        [ $width -lt ${#str} ] && width=${#str}
+    done
+}
 
 execute_mode() {
+    selected=" "
     local mode=${1?BUG: missing mode}
     retries=15
     
@@ -66,51 +75,42 @@ execute_mode() {
     #    notify "No devices found. Are they registered with D-Bus?"  
     #    return 2
     #fi
-    inc=$#
+    setwidth "$@"
+    
+    inc=$(($#))
     inc=$((inc-1))
-    demon=$(eval printf \"\$$inc\"); 
-    inc=$((inc-2))
-    tellar=$(eval printf \"\$$inc\"); 
-    smoll=${#demon}
-    demon=${demon:1:-1}$tella$tellar
-    inc=$((inc-1))
+    demon=$(eval printf "%s" \$\{$inc\}); 
+    inc=$((inc+1))
+    tellar=$(eval printf "%s" \$\{$inc\});
+    demon=$(printf "%-4s%-"$width"s%s" $selected ${demon:1:-1} $tellar)
+    inc=$((inc-4))
     while (( $inc >= 2 )); do
-        aussie=$(eval printf \"\$$inc\"); 
-        inc=$((inc-2))
-        tellar=$(eval printf \"\$$inc\"); 
-        inc=$((inc+2))
-        demon=$(printf "%s»%s%s" $demon ${aussie:1:-1} $tellar);
-        
-        #demon=${eval echo \"\$$inc\"}
-        #printf $demon
-        #set +x $@ $demon
-        #echo $1
-        inc=$((inc-3))
+        aussie=$(eval printf "%s" \"\$\{$inc\}\"); 
+        inc=$((inc+1))
+        tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
+        demon+=$(printf "»%-4s%-"$width"s%s" $selected ${aussie:1:-1} $tellar);
+        inc=$((inc-4))
     done
-    #| sed -E "s/«/    /g" 
-    demon=$(echo $demon | sed -E "s/»/`space=${#demon}; while (( smoll > i++ )); do ( printf " " ); done; unset space;`\n/g")
+    demon=$(echo $demon | sed -E "s/»/\n/g")
     demon+=$(printf \\n%s " ")
     demon+=$(printf \\nPowered%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -E "s/b/:/"`)
     demon+=$(printf \\nDiscoverable%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -E "s/b/:/"`)
     demon+=$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
-    name=$(printf '%s\n' $demon | dmenu -l $# -p "btmenu")
+    name=$(printf '%s\n' $demon | dmenu -l $MAXLINES -p "btmenu")
     unset aussie
     unset demon
     unset inc
-    return 
-    #[[ $name ]] || return
-    mac=${name:format+2:-1}
-    if [[ ${name:1:1} != " " ]]; then
+    mac=${name:width+4:-1}
+    
+    if [[ ${name:1:1}!=" " ]]; then
+        #TODO how about printing something in lay terms instead of nothing at all
         notify "Changing $name"
-        mac=$(echo "$name" | sed -e "s/: yes/ off/")
-        if [[ $mac =~ "$name" ]]; then 
-            mac=$(echo "$name" | sed -e "s/: no/ on/")
-        fi
-        debug=$(echo ${mac,,} | _bluetoothctl)
-        echo $debug 
+        #TODO fix this mess without grep, add some logic to it 
+        mac=$(echo "busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
+        eval $mac
+        #busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered b true
         exit 
     else
-    
         notify "Attempting to $mode $preposition $mac"
         while (( retries-- )); do
             printf '%s %s\n' "$mode" "$mac" | _bluetoothctl
@@ -135,5 +135,4 @@ execute_mode() {
     unset retries
     
 }
-printf "%s" "$@"
 execute_mode "$@"
