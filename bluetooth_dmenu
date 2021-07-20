@@ -2,11 +2,8 @@
 IFS=$'\n'
 MAXLINES=15
 tempfile="/tmp/bluethoothdmenudevicelist.txt"
-_bluetoothctl() {
-    LC_ALL=C timeout 30 bluetoothctl
-}
 width=0
-mode="connect"
+mode="Connect"
 set +x $mode 
 unset $mode
 
@@ -61,11 +58,11 @@ execute_mode() {
     retries=15
     
     case $mode in
-        connect)
+        Connect)
             preposition=to
             expected_to_connect=yes
         ;;
-        disconnect)
+        Disconnect)
             preposition=from
             expected_to_connect=no
         ;;
@@ -78,12 +75,12 @@ execute_mode() {
     setwidth "$@"
     
     inc=$(($#))
+    
+    tellar=$(eval printf "%s" \$\{$inc\});
     inc=$((inc-1))
     demon=$(eval printf "%s" \$\{$inc\}); 
-    inc=$((inc+1))
-    tellar=$(eval printf "%s" \$\{$inc\});
     demon=$(printf "%-4s%-"$width"s%s" $selected ${demon:1:-1} $tellar)
-    inc=$((inc-4))
+    inc=$((inc-3))
     while (( $inc >= 2 )); do
         aussie=$(eval printf "%s" \"\$\{$inc\}\"); 
         inc=$((inc+1))
@@ -98,11 +95,13 @@ execute_mode() {
     demon+=$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
     name=$(printf '%s\n' $demon | dmenu -l $MAXLINES -p "btmenu")
     unset aussie
+    unset tellar
     unset demon
     unset inc
-    mac=${name:width+4:-1}
+    mac=${name:width+5:-1}
+    #printf "%s  %s|||%s" $name $mac ${name:1:1}
     
-    if [[ ${name:1:1}!=" " ]]; then
+    if [ ${name:1:1} != " " ]; then
         #TODO how about printing something in lay terms instead of nothing at all
         notify "Changing $name"
         #TODO fix this mess without grep, add some logic to it 
@@ -112,20 +111,22 @@ execute_mode() {
         exit 
     else
         notify "Attempting to $mode $preposition $mac"
-        while (( retries-- )); do
-            printf '%s %s\n' "$mode" "$mac" | _bluetoothctl
-            if printf 'info %s\n' "$mac" |
-                _bluetoothctl |
-                grep -Pq '^[\t ]+Connected: '"$expected_to_connect"; then
-                notify "${mode^}ed $preposition $name"
-                return 0
-            fi
-            sleep 1
-        done
-
-        ret="$?"
-        notify "Failed to $mode $preposition $name" 1
-        return "$ret"
+        #while (( retries-- )); do
+            final=$(printf "busctl call org.bluez /org/bluez/hci0/dev_%s org.bluez.Device1 %s " $mac $mode)
+            #$final
+            #echo $final
+            eval $final 
+            #if printf 'info %s\n' "$mac" |
+            #    _bluetoothctl |
+            #    grep -Pq '^[\t ]+Connected: '"$expected_to_connect"; then
+            #    notify "${mode^}ed $preposition $name"
+            #    return 0
+            #fi
+            #sleep 1
+        #done
+        #ret="$?"
+        #notify "Failed to $mode $preposition $name" 1
+        #return "$ret"
     fi
     unset mode
     unset name
