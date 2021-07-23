@@ -98,8 +98,9 @@ execute_mode() {
     unset tellar
     unset demon
     unset inc
+    #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
+    
     mac=${name:width+5:-1}
-    #printf "%s  %s|||%s" $name $mac ${name:1:1}
     
     if [ ${name:1:1} != " " ]; then
         #TODO how about printing something in lay terms instead of nothing at all
@@ -107,26 +108,22 @@ execute_mode() {
         #TODO fix this mess without grep, add some logic to it 
         mac=$(echo "busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
         eval $mac
-        #busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered b true
         exit 
-    else
+    elif [ ${name:1:1} == " " ]; then
+        #TODO is this really necessary?
+        mac=$( echo $mac | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
         #while (( retries-- )); do
-            final=$(printf "busctl call org.bluez /org/bluez/hci0/dev_%s org.bluez.Device1 %s " $mac $mode)
-            #$final
-            #echo $final
-            eval $final 
-            #if printf 'info %s\n' "$mac" |
-            #    _bluetoothctl |
-            #    grep -Pq '^[\t ]+Connected: '"$expected_to_connect"; then
-            #    notify "${mode^}ed $preposition $name"
-            #    return 0
-            #fi
-            #sleep 1
-        #done
-        #ret="$?"
-        #notify "Failed to $mode $preposition $name" 1
-        #return "$ret"
+            final=$(printf "busctl call org.bluez /org/bluez/hci0/dev_%s org.bluez.Device1 %s " $mac $mode) 
+            echo $final
+            mkfifo output
+            eval $final 2> output & while read -r line
+            do
+                notify "$line"
+            done < output
+            rm output
+    else
+        exit
     fi
     unset mode
     unset name
