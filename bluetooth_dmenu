@@ -4,25 +4,30 @@ MAXLINES=15
 tempfile="/tmp/bluethoothdmenudevicelist.txt"
 width=0
 mode="Connect"
+connectedTo=""
 set +x $mode 
 unset $mode
 
 busctl tree org.bluez > $tempfile
 while read mac; do
-    a=$(echo ${mac##*/dev_}| grep -v "└─/org")
-    if [ -z $a ]; then
+    t=$(echo ${mac##*/dev_}| grep -v "└─/org")
+    a=$(echo ${t%%/*})
+    isConnected=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Connected)
+    #isConnected=${isConnected##b }
+    #Discard repeats due to there being "sub-adresses"
+    if [ -z $a ] || [ $a != $t ]; then
         continue;
     fi
     b=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Alias)
     b=${b##s }
     
+    #If you're wondering why im saving the adress, im assuming it can be different than the a variable, i also use it to display on dmenu
     c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
     c=${c##s }
-    #if ( 
-    #    [ ${#b} > $width ]
-    #) then ( 
-    #    width=${#b} 
-    #) fi
+    if [ $isConnected = "b true" ]; then
+        connectedTo="$c"
+        #echo $connectedTo; 
+    fi
     old=""
     set +x $@ $a $b $c;
     
@@ -77,15 +82,23 @@ execute_mode() {
     inc=$(($#))
     
     tellar=$(eval printf "%s" \$\{$inc\});
+    if [ $connectedTo = $tellar ]; then
+        selected=" ---"
+    fi 
     inc=$((inc-1))
     demon=$(eval printf "%s" \$\{$inc\}); 
-    demon=$(printf "%-4s%-"$width"s%s" $selected ${demon:1:-1} $tellar)
+    
+    demon=$(printf "%-5s%-"$width"s%s" $selected ${demon:1:-1} $tellar)
     inc=$((inc-3))
     while (( $inc >= 2 )); do
+        selected=" "
         aussie=$(eval printf "%s" \"\$\{$inc\}\"); 
         inc=$((inc+1))
         tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
-        demon+=$(printf "»%-4s%-"$width"s%s" $selected ${aussie:1:-1} $tellar);
+        if [ $connectedTo = $tellar ]; then
+            selected=" ---"
+        fi 
+        demon+=$(printf "»%-5s%-"$width"s%s" $selected ${aussie:1:-1} $tellar);
         inc=$((inc-4))
     done
     demon=$(echo $demon | sed -E "s/»/\n/g")
@@ -100,17 +113,13 @@ execute_mode() {
     unset inc
     #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
     
-    mac=${name:width+5:-1}
-    
-    if [ ${name:1:1} != " " ]; then
-        #TODO how about printing something in lay terms instead of nothing at all
-        notify "Changing $name"
-        #TODO fix this mess without grep, add some logic to it 
-        mac=$(echo "busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
-        eval $mac
-        exit 
-    elif [ ${name:1:1} == " " ]; then
-        #TODO is this really necessary?
+    mac=${name:width+6:-1}
+    if [ ${name:0:1} = " " ]; then
+                #TODO is this really necessary?
+        if [ ${name:2:1} = "-" ]; then
+            mode="Disconnect"
+            name=${name:5}
+        fi
         mac=$( echo $mac | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
         #while (( retries-- )); do
@@ -122,6 +131,13 @@ execute_mode() {
                 notify "$line"
             done < output
             rm output
+    elif [ ${name:1:1} != " " ]; then
+        #TODO how about printing something in lay terms instead of nothing at all
+        notify "Changing $name"
+        #TODO fix this mess without grep, add some logic to it 
+        mac=$(echo "busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
+        eval $mac
+        exit 
     else
         exit
     fi
