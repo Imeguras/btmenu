@@ -5,6 +5,11 @@ tempfile="/tmp/bluethoothdmenudevicelist.txt"
 width=0
 mode="Connect"
 connectedTo=""
+SERVICE="org.bluez"
+OBJ_SELF="/org/bluez/hci0"
+OBJ_TEMPLATE="/org/bluez/hci0/dev_"
+INTERFACE_SELF="org.bluez.Adapter1"
+INTERFACE="org.bluez.Device1"
 set +x $mode 
 unset $mode
 
@@ -12,17 +17,18 @@ busctl tree org.bluez > $tempfile
 while read mac; do
     t=$(echo ${mac##*/dev_}| grep -v "└─/org")
     a=$(echo ${t%%/*})
-    isConnected=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Connected)
-    #isConnected=${isConnected##b }
     #Discard repeats due to there being "sub-adresses"
     if [ -z $a ] || [ $a != $t ]; then
         continue;
     fi
-    b=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Alias)
+    isConnected=$(busctl get-property $SERVICE $OBJ_TEMPLATE$a $INTERFACE Connected)
+    #isConnected=${isConnected##b }
+    
+    b=$(busctl get-property $SERVICE $OBJ_TEMPLATE$a $INTERFACE Alias)
     b=${b##s }
     
     #If you're wondering why im saving the adress, im assuming it can be different than the a variable, i also use it to display on dmenu
-    c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
+    c=$(busctl get-property $SERVICE $OBJ_TEMPLATE$a $INTERFACE Address)
     c=${c##s }
     if [ $isConnected = "b true" ]; then
         connectedTo="$c"
@@ -73,16 +79,16 @@ execute_mode() {
         ;;
     esac
     #TODO annoying...
-    #if ( ${2:-true} ) then 
-    #    notify "No devices found. Are they registered with D-Bus?"  
-    #    return 2
-    #fi
+    if [ ! ${2} ]; then 
+        notify "No devices found. Are they registered with D-Bus?"  
+        return 2
+    fi
     setwidth "$@"
     
     inc=$(($#))
     
     tellar=$(eval printf "%s" \$\{$inc\});
-    if [ $connectedTo = $tellar ]; then
+    if [ $connectedTo=$tellar ]; then
         selected=" ---"
     fi 
     inc=$((inc-1))
@@ -95,7 +101,7 @@ execute_mode() {
         aussie=$(eval printf "%s" \"\$\{$inc\}\"); 
         inc=$((inc+1))
         tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
-        if [ $connectedTo = $tellar ]; then
+        if [ $connectedTo=$tellar ]; then
             selected=" ---"
         fi 
         demon+=$(printf "»%-5s%-"$width"s%s" $selected ${aussie:1:-1} $tellar);
@@ -103,9 +109,9 @@ execute_mode() {
     done
     demon=$(echo $demon | sed -E "s/»/\n/g")
     demon+=$(printf \\n%s " ")
-    demon+=$(printf \\nPowered%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -E "s/b/:/"`)
-    demon+=$(printf \\nDiscoverable%s `busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -E "s/b/:/"`)
-    demon+=$(printf \\nPairable%s`busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -E "s/b/:/"`)
+    demon+=$(printf \\nPowered%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Powered | sed -E "s/b/:/"`)
+    demon+=$(printf \\nDiscoverable%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Discoverable | sed -E "s/b/:/"`)
+    demon+=$(printf \\nPairable%s`busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Pairable | sed -E "s/b/:/"`)
     name=$(printf '%s\n' $demon | dmenu -l $MAXLINES -p "btmenu")
     unset aussie
     unset tellar
@@ -114,16 +120,16 @@ execute_mode() {
     #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
     
     mac=${name:width+6:-1}
-    if [ ${name:0:1} = " " ]; then
+    if [ ${name:0:1}=" " ]; then
                 #TODO is this really necessary?
-        if [ ${name:2:1} = "-" ]; then
+        if [ ${name:2:1}="-" ]; then
             mode="Disconnect"
             name=${name:5}
         fi
         mac=$( echo $mac | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
         #while (( retries-- )); do
-            final=$(printf "busctl call org.bluez /org/bluez/hci0/dev_%s org.bluez.Device1 %s " $mac $mode) 
+            final=$(printf "busctl call $SERVICE $OBJ_TEMPLATE%s $INTERFACE %s " $mac $mode) 
             echo $final
             mkfifo output
             eval $final 2> output & while read -r line
@@ -135,7 +141,7 @@ execute_mode() {
         #TODO how about printing something in lay terms instead of nothing at all
         notify "Changing $name"
         #TODO fix this mess without grep, add some logic to it 
-        mac=$(echo "busctl set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
+        mac=$(echo "busctl set-property $SERVICE $OBJ_SELF $INTERFACE $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
         eval $mac
         exit 
     else
