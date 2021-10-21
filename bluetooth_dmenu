@@ -5,11 +5,21 @@ tempfile="/tmp/bluethoothdmenudevicelist.txt"
 width=0
 mode="Connect"
 connectedTo=""
+# USER DEFINED VARIABLES
+# ----------------------
 SERVICE="org.bluez"
 OBJ_SELF="/org/bluez/hci0"
 OBJ_TEMPLATE="/org/bluez/hci0/dev_"
 INTERFACE_SELF="org.bluez.Adapter1"
 INTERFACE="org.bluez.Device1"
+# Prefixes these were needed because i didn't know that substring indexing was not POSIX compliant
+# Prefix for previously paired devices, these have to be added in busctl
+DELIM_DEVICES=""
+# Prefix for empty/blank lines
+DELIM_SPACE="¦"
+# Prefix for properties, in the properties section
+DELIM_PROPS="|"
+
 set +x $mode 
 unset $mode
 
@@ -18,12 +28,10 @@ while read mac; do
     t=$(echo ${mac##*/dev_}| grep -v "└─/org")
     a=$(echo ${t%%/*})
     #Discard repeats due to there being "sub-adresses"
-    if [ -z $a ] || [ $a != $t ]; then
+    if [ -z "$a" ] || [ "$a" != "$t" ]; then
         continue;
     fi
     isConnected=$(busctl get-property $SERVICE $OBJ_TEMPLATE$a $INTERFACE Connected)
-    #isConnected=${isConnected##b }
-    
     b=$(busctl get-property $SERVICE $OBJ_TEMPLATE$a $INTERFACE Alias)
     b=${b##s }
     
@@ -34,8 +42,7 @@ while read mac; do
         connectedTo="$c"
         #echo $connectedTo; 
     fi
-    old=""
-    set +x $@ $a $b $c;
+    set +x "$@" "$a" "$b" "$c";
     
 done < $tempfile
 
@@ -47,8 +54,8 @@ notify() {
     if command -v notify-send >/dev/null 2>&1; then
         notify-send "btmenu" "$msg"  # TODO: escaping
     fi
-
-    if (( is_error )); then
+    
+    if [ "$is_error" ]; then
         printf 'ERROR: %s\n' "$msg" >&2
     else
         printf '%s\n' "$msg"
@@ -64,21 +71,18 @@ setwidth(){
 }
 
 execute_mode() {
-    selected=" "
-    local mode=${1?BUG: missing mode}
-    retries=15
+    selected="$DELIM_DEVICES"
+    mode=${1?BUG: missing mode}
     
     case $mode in
         Connect)
-            preposition=to
-            expected_to_connect=yes
+            preposition=to 
         ;;
         Disconnect)
             preposition=from
-            expected_to_connect=no
         ;;
     esac
-    #TODO annoying...
+    
     if [ ! ${2} ]; then 
         notify "No devices found. Are they registered with D-Bus?"  
         return 2
@@ -88,30 +92,31 @@ execute_mode() {
     inc=$(($#))
     
     tellar=$(eval printf "%s" \$\{$inc\});
-    if [ $connectedTo=$tellar ]; then
+    if [ "$connectedTo" = "$tellar" ]; then
         selected=" ---"
     fi 
     inc=$((inc-1))
     demon=$(eval printf "%s" \$\{$inc\}); 
     
-    demon=$(printf "%-5s%-"$width"s%s" $selected ${demon:1:-1} $tellar)
+    demon=$(printf "%-5s%-${width}s%s" "$selected" "${demon:1:-1}" "$tellar")
     inc=$((inc-3))
-    while (( $inc >= 2 )); do
-        selected=" "
+    while [ $inc -ge 2 ]; do
+        selected="$DELIM_DEVICES"
         aussie=$(eval printf "%s" \"\$\{$inc\}\"); 
         inc=$((inc+1))
         tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
-        if [ $connectedTo=$tellar ]; then
+        if [ "$connectedTo" = "$tellar" ]; then
             selected=" ---"
         fi 
-        demon+=$(printf "»%-5s%-"$width"s%s" $selected ${aussie:1:-1} $tellar);
+        demon="$demon"$(printf "»%-5s%-${width}s%s" "$selected" "${aussie:1:-1}" "$tellar");
         inc=$((inc-4))
     done
+    #Apparently in posix shells += is undefined so yeah i had to go back in "cleaness"
     demon=$(echo $demon | sed -E "s/»/\n/g")
-    demon+=$(printf \\n%s " ")
-    demon+=$(printf \\nPowered%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Powered | sed -E "s/b/:/"`)
-    demon+=$(printf \\nDiscoverable%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Discoverable | sed -E "s/b/:/"`)
-    demon+=$(printf \\nPairable%s`busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Pairable | sed -E "s/b/:/"`)
+    demon="$demon"$(printf \\n%s "$DELIM_SPACE")
+    demon="$demon"$(printf \\n${DELIM_PROPS}Powered%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Powered | sed -E "s/b/:/"`)
+    demon="$demon"$(printf \\n${DELIM_PROPS}Discoverable%s `busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Discoverable | sed -E "s/b/:/"`)
+    demon="$demon"$(printf \\n${DELIM_PROPS}Pairable%s`busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Pairable | sed -E "s/b/:/"`)
     name=$(printf '%s\n' $demon | dmenu -l $MAXLINES -p "btmenu")
     unset aussie
     unset tellar
@@ -119,13 +124,17 @@ execute_mode() {
     unset inc
     #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
     
-    mac=${name:width+6:-1}
-    if [ ${name:0:1}=" " ]; then
-                #TODO is this really necessary?
-        if [ ${name:2:1}="-" ]; then
+    #TODO theres most likely an error in case of a device having a name containing a " although i haven't researched it 
+    
+    mac=$(echo "$name" | cut -d\" -f 2)
+
+    if [ "${name##$DELIM_DEVICES}" != "$name" ]; then
+        #TODO Theres an error in case of a device having a name containing a -
+        if [ "${name##-}" != "$name" ]; then
             mode="Disconnect"
-            name=${name:5}
+            #$name=${name:5}
         fi
+
         mac=$( echo $mac | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
         #while (( retries-- )); do
@@ -137,11 +146,11 @@ execute_mode() {
                 notify "$line"
             done < output
             rm output
-    elif [ ${name:1:1} != " " ]; then
+    elif [ "${name:0:1}" != " " ]; then
         #TODO how about printing something in lay terms instead of nothing at all
-        notify "Changing $name"
+        notify "Changing property off ${name}"
         #TODO fix this mess without grep, add some logic to it 
-        mac=$(echo "busctl set-property $SERVICE $OBJ_SELF $INTERFACE $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
+        mac=$(echo "busctl set-property $SERVICE $OBJ_SELF $INTERFACE_SELF $name" | sed -e "s/: true/ b false/"| sed -e "s/: false/ b true/")
         eval $mac
         exit 
     else
