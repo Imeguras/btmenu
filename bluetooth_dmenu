@@ -1,141 +1,154 @@
 #!/bin/sh
+IFS='
+'
+MAXLINES=15
+tempfile="/tmp/bluethoothdmenudevicelist.txt"
+width=0
+mode="Connect"
+connectedTo=""
+# USER DEFINED VARIABLES
+# ----------------------
+SERVICE="org.bluez"
+OBJ_SELF="/org/bluez/hci0"
+OBJ_TEMPLATE="/org/bluez/hci0/dev_"
+INTERFACE_SELF="org.bluez.Adapter1"
+INTERFACE="org.bluez.Device1"
+# Prefixes these were needed because i didn't know that substring indexing was not POSIX compliant
+# Prefix for previously paired devices, these have to be added in busctl
+DELIM_DEVICES=""
+# Prefix for empty/blank lines
+DELIM_SPACE="¦"
+# Prefix for properties, in the properties section
+DELIM_PROPS="|"
 
-_bluetoothctl() {
-    LC_ALL=C timeout 30 bluetoothctl
-}
+set +x $mode 
+unset $mode
 
-mode=connect
-# Name -> MAC
-#declare -A DEVICES
-#finalArgs=()
-#format=0
+busctl tree org.bluez > $tempfile
 while read mac; do
-    a=$(echo ${mac##*/dev_}| grep -v "└─/org")
-    if [ -z $a ]; then
+    t=$(echo "${mac##*/dev_}"| grep -v "└─/org")
+    a=${t%%/*}
+    #Discard repeats due to there being "sub-adresses"
+    if [ -z "$a" ] || [ "$a" != "$t" ]; then
         continue;
     fi
-    b=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Alias)
-    c=$(busctl get-property org.bluez /org/bluez/hci0/dev_$a org.bluez.Device1 Address)
-    set +x $@ $a $b $c
-done < <(busctl tree org.bluez)
+    isConnected=$(busctl get-property $SERVICE $OBJ_TEMPLATE"$a" $INTERFACE Connected)
+    b=$(busctl get-property $SERVICE $OBJ_TEMPLATE"$a" $INTERFACE Alias)
+    b=${b##s }
+    
+    #If you're wondering why im saving the adress, im assuming it can be different than the a variable, i also use it to display on dmenu
+    c=$(busctl get-property $SERVICE $OBJ_TEMPLATE"$a" $INTERFACE Address)
+    c=${c##s }
+    if [ "$isConnected" = "b true" ]; then
+        connectedTo="$c"
+        #echo $connectedTo; 
+    fi
+    set +x "$@" "$a" "$b" "$c";
+    
+done < $tempfile
+
 unset a; unset b; unset c;
+#echo "$#"
 notify() {
     msg=${1?BUG: no message}
-    is_error=${2:-0}
+    is_error=${2}
     if command -v notify-send >/dev/null 2>&1; then
         notify-send "btmenu" "$msg"  # TODO: escaping
     fi
-
-    if (( is_error )); then
+    
+    if [ "$is_error" ]; then
         printf 'ERROR: %s\n' "$msg" >&2
     else
         printf '%s\n' "$msg"
     fi
-    unset msg
-    unset is_error
+    unset msg is_error
+}
+setwidth(){
+    width=0
+    for str in "$@"; do
+        [ $width -lt ${#str} ] && width=${#str}
+    done
 }
 
 execute_mode() {
-    
-    #local mode
-    #local name
-    #local mac
-    #local preposition
-    #local expected_to_connect
-    #local retries
+    selected="$DELIM_DEVICES"
     mode=${1?BUG: missing mode}
-    retries=15
     
     case $mode in
-        connect)
-            preposition=to
-            expected_to_connect=yes
+        Connect)
+            preposition=to 
         ;;
-        disconnect)
+        Disconnect)
             preposition=from
-            expected_to_connect=no
         ;;
     esac
-    if [ -z "$2" ]; then
+    
+    if [ ! "${2}" ]; then 
         notify "No devices found. Are they registered with D-Bus?"  
         return 2
     fi
-    inc=$#
-    while (( $inc >= 1 )); do
-        eval echo \"\$$inc\"
+    setwidth "$@"
+    
+    inc=$(($#))
+    
+    while [ $inc -ge 2 ]; do
+        selected="$DELIM_DEVICES"
+        tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
+        inc=$((inc-1))
+        if [ "$connectedTo" = "$tellar" ]; then
+            selected="$DELIM_DEVICES ---"
+        fi 
+        aussie=$(eval printf "%s" \"\$\{$inc\}\" | cut -d\" -f 2 ); 
+
+        demon="$demon"$(printf "%-5s%-${width}s%s»" "$selected" "$aussie" "$tellar");
         inc=$((inc-2))
     done
-    #finalArgs=("${!DEVICES[@]}") 
-    #while (( ${#finalArgs[@]} > $inc)); do
-    #    prov=${finalArgs[$inc]}
-    #    finalArgs[$inc]="    "$prov
-    #    while (( ${#finalArgs[$inc]} <= $format )); do
-    #        finalArgs[$inc]+=" "
-    #    done
-    #    finalArgs[$inc]+="|"${DEVICES[$prov]}"|"
-    #   inc=$((inc+1))
-    #done
+    #Apparently in posix shells += is undefined so yeah i had to go back in "cleaness"
+    #MAYBETODO maybe we could set like a "pointer" in the list to set which 
+    demon=$(echo "$demon" | sed -E "s/»/\n/g")
+    demon="$demon"$(printf \\n%s "$DELIM_SPACE")
+    demon="$demon"$(printf \\n${DELIM_PROPS}Powered%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Powered | sed -E "s/b/:/")")
+    demon="$demon"$(printf \\n${DELIM_PROPS}Discoverable%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Discoverable | sed -E "s/b/:/")")
+    demon="$demon"$(printf \\n${DELIM_PROPS}Pairable%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Pairable | sed -E "s/b/:/")")
+    name=$(printf '%s\n' "$demon" | dmenu -l $MAXLINES -p "btmenu")
+    unset aussie tellar demon inc
+    #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
     
-    finalArgs[inc++]=" "
-    finalArgs[inc++]="Powered"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered | sed -e "s/b/:/")
-    finalArgs[inc++]="Discoverable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Discoverable | sed -e "s/b/:/")
-    finalArgs[inc++]="Pairable"$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Pairable | sed -e "s/b/:/")
-    name=$(printf '%s\n' "${finalArgs[@]}" | dmenu -l ${#finalArgs[@]} -p "btmenu")
-    unset inc
-    [[ $name ]] || return
-    mac=${name:format+2:-1}
-    if [[ ${name:1:1} != " " ]]; then
-        notify "Changing $name"
-        mac=$(echo "$name" | sed -e "s/: yes/ off/")
-        if [[ $mac =~ "$name" ]]; then 
-            mac=$(echo "$name" | sed -e "s/: no/ on/")
+    #TODO theres most likely an error in case of a device having a name containing a " although i haven't researched it 
+    
+    mac=$(echo "$name" | cut -d\" -f 2)
+
+    if [ "${name##$DELIM_DEVICES}" != "$name" ]; then
+        #TODO Theres an error in case of a device having a name containing a -
+        if [ "${name##"$DELIM_DEVICES ---"}" != "$name" ]; then
+            mode="Disconnect"
+            #$name=${name:5}
         fi
-        debug=$(echo ${mac,,} | _bluetoothctl)
-        echo $debug 
-        exit 
-    else
-    
+
+        mac=$( echo "$mac" | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
-        while (( retries-- )); do
-            printf '%s %s\n' "$mode" "$mac" | _bluetoothctl
-            if printf 'info %s\n' "$mac" |
-                _bluetoothctl |
-                grep -Pq '^[\t ]+Connected: '"$expected_to_connect"; then
-                notify "${mode^}ed $preposition $name"
-                return 0
-            fi
-            sleep 1
-        done
-
-        ret="$?"
-        notify "Failed to $mode $preposition $name" 1
-        return "$ret"
-    fi
-    unset mode
-    unset name
-    unset mac
-    unset preposition
-    unset expected_to_connect
-    unset retries
-    
+        
+        final=$(printf "busctl call $SERVICE $OBJ_TEMPLATE%s $INTERFACE %s " "$mac" "$mode") 
+        mkfifo output
+        eval "$final" 2> output & while read -r line
+        do
+            notify "$line"
+        done < output
+        rm output
+    elif [ "${name##$DELIM_PROPS}" != "$name" ]; then
+        
+        name="${name##|}"
+        #TODO fix this mess without sed, add some logic to it 
+        state=$(echo "$name" | cut -d\: -f 2 | sed -e "s/ true/false/"| sed -e "s/ false/true/")
+        name=$(echo "$name" | cut -d\: -f 1)
+        notify "Changing property [${name}] to ${state}"
+        mac=$(echo "busctl set-property $SERVICE $OBJ_SELF $INTERFACE_SELF $name b $state")
+        eval "$mac"
+        
+    else
+        echo "Exiting, due to lack of relevant input"
+    fi 
+    unset mode name mac preposition state
+    exit
 }
-
-i=2
-
-
-for arg do
-    if [[ $arg == :: ]]; then
-        echo "abems"
-        dmenu_args=( "${@:$i}" )
-        break
-    fi
-   
-    case "$arg" in
-        -d) mode=disconnect ;;
-    esac
-
-    (( i++ ))
-done
-
-set +x $mode $@ 
 execute_mode "$@"
