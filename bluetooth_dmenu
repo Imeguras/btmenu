@@ -61,8 +61,7 @@ notify() {
     else
         printf '%s\n' "$msg"
     fi
-    unset msg
-    unset is_error
+    unset msg is_error
 }
 setwidth(){
     width=0
@@ -92,37 +91,27 @@ execute_mode() {
     
     inc=$(($#))
     
-    tellar=$(eval printf "%s" \$\{$inc\});
-    if [ "$connectedTo" = "$tellar" ]; then
-        selected=" ---"
-    fi 
-    inc=$((inc-1))
-    demon=$(eval printf "%s" \$\{$inc\} | cut -d\" -f 2 ); 
-    
-    demon=$(printf "%-5s%-${width}s%s" "$selected" "$demon" "$tellar")
-    inc=$((inc-3))
     while [ $inc -ge 2 ]; do
         selected="$DELIM_DEVICES"
-        aussie=$(eval printf "%s" \"\$\{$inc\}\" | cut -d\" -f 2 ); 
-        inc=$((inc+1))
         tellar=$(eval printf "%s" \"\$\{$inc\}\"); 
+        inc=$((inc-1))
         if [ "$connectedTo" = "$tellar" ]; then
-            selected=" ---"
+            selected="$DELIM_DEVICES ---"
         fi 
-        demon="$demon"$(printf "»%-5s%-${width}s%s" "$selected" "$aussie" "$tellar");
-        inc=$((inc-4))
+        aussie=$(eval printf "%s" \"\$\{$inc\}\" | cut -d\" -f 2 ); 
+
+        demon="$demon"$(printf "%-5s%-${width}s%s»" "$selected" "$aussie" "$tellar");
+        inc=$((inc-2))
     done
     #Apparently in posix shells += is undefined so yeah i had to go back in "cleaness"
+    #MAYBETODO maybe we could set like a "pointer" in the list to set which 
     demon=$(echo "$demon" | sed -E "s/»/\n/g")
     demon="$demon"$(printf \\n%s "$DELIM_SPACE")
     demon="$demon"$(printf \\n${DELIM_PROPS}Powered%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Powered | sed -E "s/b/:/")")
     demon="$demon"$(printf \\n${DELIM_PROPS}Discoverable%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Discoverable | sed -E "s/b/:/")")
     demon="$demon"$(printf \\n${DELIM_PROPS}Pairable%s "$(busctl get-property $SERVICE $OBJ_SELF $INTERFACE_SELF Pairable | sed -E "s/b/:/")")
     name=$(printf '%s\n' "$demon" | dmenu -l $MAXLINES -p "btmenu")
-    unset aussie
-    unset tellar
-    unset demon
-    unset inc
+    unset aussie tellar demon inc
     #the idea is that an adress presented on the device may be corrupted or mismatch the one saved on busctl but for now i will do it the lazy way
     
     #TODO theres most likely an error in case of a device having a name containing a " although i haven't researched it 
@@ -131,22 +120,21 @@ execute_mode() {
 
     if [ "${name##$DELIM_DEVICES}" != "$name" ]; then
         #TODO Theres an error in case of a device having a name containing a -
-        if [ "${name##-}" != "$name" ]; then
+        if [ "${name##"$DELIM_DEVICES ---"}" != "$name" ]; then
             mode="Disconnect"
             #$name=${name:5}
         fi
 
         mac=$( echo "$mac" | sed -e "s/:/_/g" )
         notify "Attempting to $mode $preposition $mac"
-        #while (( retries-- )); do
-            final=$(printf "busctl call $SERVICE $OBJ_TEMPLATE%s $INTERFACE %s " "$mac" "$mode") 
-            echo "$final"
-            mkfifo output
-            eval "$final" 2> output & while read -r line
-            do
-                notify "$line"
-            done < output
-            rm output
+        
+        final=$(printf "busctl call $SERVICE $OBJ_TEMPLATE%s $INTERFACE %s " "$mac" "$mode") 
+        mkfifo output
+        eval "$final" 2> output & while read -r line
+        do
+            notify "$line"
+        done < output
+        rm output
     elif [ "${name##$DELIM_PROPS}" != "$name" ]; then
         
         name="${name##|}"
@@ -160,11 +148,7 @@ execute_mode() {
     else
         echo "Exiting, due to lack of relevant input"
     fi 
-    unset mode
-    unset name
-    unset mac
-    unset preposition
-    unset state  
+    unset mode name mac preposition state
     exit
 }
 execute_mode "$@"
